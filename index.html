@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fog Mirror</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300&family=Hanken+Grotesk:wght@400;500&display=swap">
+<style>
+  :root { --ink:#eef4f8; --glass:rgba(20,30,38,.55); --accent:#9fd8ff; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:#0b1115; overflow:hidden;
+    font-family:"Avenir Next","Segoe UI",system-ui,sans-serif; color:var(--ink); }
+  video { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+  canvas#view { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  #cursor { position:absolute; width:26px; height:26px; margin:-13px 0 0 -13px; border-radius:50%;
+    border:2px solid rgba(255,255,255,.85); box-shadow:0 0 14px rgba(159,216,255,.7);
+    pointer-events:none; display:none; transition:transform .12s, background .12s; }
+  #cursor.draw { background:rgba(159,216,255,.3); }
+  .glass { background:var(--glass); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); }
+  #status { position:absolute; left:50%; bottom:calc(22px + env(safe-area-inset-bottom,0px));
+    transform:translateX(-50%); padding:10px 18px; border-radius:999px; font-size:15px;
+    white-space:nowrap; display:none; }
+  #controls { position:absolute; top:calc(14px + env(safe-area-inset-top,0px)); right:14px; left:14px;
+    display:none; flex-wrap:wrap; gap:8px; justify-content:flex-end; align-items:center; }
+  #controls > * { border-radius:999px; font-size:14px; }
+  #controls button { padding:9px 16px; background:var(--glass); }
+  #controls button[aria-pressed="false"] { opacity:.6; }
+  .zoom { display:flex; align-items:center; gap:10px; padding:7px 14px; background:var(--glass); }
+  .zoom input { width:clamp(90px,18vw,170px); accent-color:var(--accent); }
+  .zoom output { min-width:2.6em; text-align:right; font-variant-numeric:tabular-nums; }
+  #toast { position:absolute; top:calc(70px + env(safe-area-inset-top,0px)); left:50%; transform:translateX(-50%);
+    padding:9px 16px; border-radius:999px; font-size:14px; display:none; }
+  #reveal { position:absolute; left:12px; bottom:calc(12px + env(safe-area-inset-bottom,0px)); display:none;
+    padding:6px 12px; font-size:12px; opacity:.18; background:var(--glass); }
+  #reveal:hover, #reveal:focus-visible { opacity:1; }
+  body.nui #status, body.nui #controls, body.nui #cursor, body.nui #toast { display:none !important; }
+  body.nui.live #reveal { display:block; }
+  button { font:inherit; color:var(--ink); cursor:pointer; border:1px solid rgba(255,255,255,.45); background:rgba(255,255,255,.12); }
+  button:hover { background:rgba(255,255,255,.22); }
+  button:focus-visible, input:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+
+  /* ---- Landing ---- */
+  #intro { position:absolute; inset:0; overflow:hidden; display:flex; align-items:center; justify-content:center;
+    padding:24px; background:#070c10; touch-action:none; font-family:"Hanken Grotesk","Segoe UI",system-ui,sans-serif; }
+  .scene { position:absolute; inset:0; }
+  .glow { position:absolute; border-radius:50%; animation:drift 28s ease-in-out infinite alternate; }
+  .g1 { width:64vmax; height:64vmax; left:-18vmax; top:-24vmax; background:radial-gradient(circle,#1f5a73 0%,rgba(31,90,115,0) 66%); opacity:.85; }
+  .g2 { width:54vmax; height:54vmax; right:-20vmax; bottom:-26vmax; background:radial-gradient(circle,#46405a 0%,rgba(70,64,90,0) 66%); opacity:.8; animation-direction:alternate-reverse; animation-duration:34s; }
+  .g3 { width:30vmax; height:30vmax; right:6vmax; bottom:-8vmax; background:radial-gradient(circle,rgba(255,188,122,.26) 0%,rgba(255,188,122,0) 68%); animation-duration:40s; }
+  @keyframes drift { to { transform:translate3d(5vmax,-4vmax,0) scale(1.08); } }
+  #drops { position:absolute; inset:0; }
+  .drop { position:absolute; border-radius:50%;
+    background:radial-gradient(circle at 32% 28%,rgba(255,255,255,.75),rgba(255,255,255,.08) 55%,rgba(255,255,255,0) 72%);
+    box-shadow:inset 0 -1px 2px rgba(255,255,255,.2); }
+  #introFog { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+  .stage { position:relative; z-index:2; width:min(600px,100%); text-align:center; }
+  .stage h1 { margin:0 0 20px; font:300 clamp(52px,11vw,112px)/.92 "Fraunces","Iowan Old Style",Georgia,serif;
+    letter-spacing:-.035em; color:#f3f9fc; text-shadow:0 0 50px rgba(159,216,255,.28); animation:clear 2s cubic-bezier(.2,.7,.2,1) both; }
+  @keyframes clear { from { opacity:0; filter:blur(22px); } to { opacity:1; filter:blur(0); } }
+  .stage > :not(h1) { animation:settle 1.2s .8s ease both; }
+  @keyframes settle { from { opacity:0; } to { opacity:1; } }
+  .lede { margin:0 auto 36px; max-width:28em; font-size:17px; line-height:1.6; color:#b6c7d2; }
+  .gestures { list-style:none; margin:0 auto 38px; padding:0; max-width:500px; display:grid; grid-template-columns:repeat(3,1fr); }
+  .gestures li { display:flex; flex-direction:column; align-items:center; gap:3px; padding:4px 8px; }
+  .gestures li + li { border-left:1px solid rgba(255,255,255,.14); }
+  .gestures svg { width:46px; height:46px; margin-bottom:8px; color:#c3e6f8; }
+  .gestures b { font-weight:500; font-size:15px; color:#eef6fa; }
+  .gestures span { font-size:13px; color:#92a8b6; }
+  #start { font:500 16px "Hanken Grotesk","Segoe UI",system-ui,sans-serif; letter-spacing:.01em; padding:15px 40px; border:0; border-radius:999px;
+    color:#08141b; background:linear-gradient(#f6fcff,#cde5f2); box-shadow:inset 0 0 0 1px rgba(255,255,255,.55),0 10px 40px rgba(124,196,232,.3);
+    transition:transform .2s, box-shadow .2s; }
+  #start:hover { background:linear-gradient(#fff,#d8edf8); transform:translateY(-1px); box-shadow:inset 0 0 0 1px rgba(255,255,255,.7),0 14px 50px rgba(124,196,232,.42); }
+  #start:disabled { opacity:.7; cursor:progress; transform:none; }
+  #err { margin:14px auto 0; min-height:1.4em; max-width:30em; color:#ffb4a8; font-size:14px; }
+  .note { margin:10px 0 0; font-size:12.5px; color:#7b92a1; }
+  #wipeHint { position:absolute; left:50%; bottom:calc(20px + env(safe-area-inset-bottom,0px)); transform:translateX(-50%);
+    margin:0; font-size:13px; color:#8ba2b0; pointer-events:none; transition:opacity .8s; z-index:2; }
+  #wipeHint.gone { opacity:0; }
+  @media (prefers-reduced-motion: reduce) { .glow, .stage h1, .stage > :not(h1) { animation:none; } }
+</style>
+</head>
+<body>
+<video id="cam" playsinline muted></video>
+<canvas id="view"></canvas>
+<div id="cursor"></div>
+<div id="status" class="glass"></div>
+<div id="toast" class="glass" role="status"></div>
+
+<div id="controls">
+  <button id="flip" class="glass" title="Switch camera (C)">Switch camera</button>
+  <button id="mir" class="glass" aria-pressed="true" title="Mirror image (M)">Mirror</button>
+  <button id="inv" class="glass" aria-pressed="false" title="Invert colours (I)">Invert</button>
+  <label class="zoom glass">Zoom <input id="zoom" type="range" min="1" max="4" step="0.01" value="1"><output id="zv">1.0×</output></label>
+  <label class="zoom glass">Thickness <input id="thick" type="range" min="8" max="90" step="1" value="32"><output id="tv">32</output></label>
+  <button id="hide" class="glass" title="Hide all controls (H)">Hide UI</button>
+</div>
+<button id="reveal" class="glass" aria-label="Show controls">Show UI</button>
+
+<div id="intro">
+  <div class="scene" aria-hidden="true"><i class="glow g1"></i><i class="glow g2"></i><i class="glow g3"></i><div id="drops"></div></div>
+  <canvas id="introFog" aria-hidden="true"></canvas>
+  <main class="stage">
+    <h1>Fog Mirror</h1>
+    <p class="lede">Your camera becomes a steamed-up mirror. Write on the glass with a single fingertip.</p>
+    <ul class="gestures">
+      <li><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="12" y="26" width="26" height="16" rx="7"/><path d="M16 26V8"/><path d="M22 26V22"/><path d="M28 26V22"/><path d="M34 26V22"/><path d="M12 35l-6-6"/></svg><b>Draw</b><span>One finger</span></li>
+      <li><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="12" y="26" width="26" height="16" rx="7"/><path d="M16 26V8"/><path d="M22 26V8"/><path d="M28 26V22"/><path d="M34 26V22"/><path d="M12 35l-6-6"/></svg><b>Pause</b><span>Two fingers</span></li>
+      <li><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="12" y="26" width="26" height="16" rx="7"/><path d="M16 26V22"/><path d="M22 26V22"/><path d="M28 26V22"/><path d="M34 26V22"/><path d="M12 35l-6-6"/></svg><b>Wipe all</b><span>Hold a fist</span></li>
+    </ul>
+    <button id="start">Start camera</button>
+    <div id="err" role="alert"></div>
+    <p class="note">Runs in your browser. Your video never leaves this device.</p>
+  </main>
+  <p id="wipeHint">Drag across the glass to wipe it</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+<script>
+(() => {
+  // ---- Tweak these ----
+  const CFG = {
+    brush: 32,        // stroke width in px
+    minCutoff: 0.5,   // lower = steadier line (more lag)
+    beta: 0.006,      // higher = less lag on fast moves
+    follow: 11,       // brush catch-up speed: lower = smoother, lazier
+    dead: 1.2,        // px of finger jitter the brush ignores
+    fogBlur: 5,       // mist softness
+    haze: 0.46,       // mist thickness (0 to 1)
+    holdMs: 700,      // how long to hold a fist to clear
+    reach: 0.10       // bottom reach: you only need to get your fingertip to 90% of the way down to draw at the very bottom (0 = off)
+  };
+
+  const $ = id => document.getElementById(id);
+  const video = $('cam'), view = $('view'), ctx = view.getContext('2d');
+  const cursor = $('cursor'), statusEl = $('status'), errEl = $('err'), toastEl = $('toast');
+  const mk = () => { const c = document.createElement('canvas'); return [c, c.getContext('2d')]; };
+  const [mask, mctx] = mk(), [tmp, tctx] = mk(), [fogC, fctx] = mk(), [scr, sctx] = mk(), [noise, nctx] = mk();
+
+  noise.width = noise.height = 160;
+  const nd = nctx.createImageData(160, 160);
+  for (let i = 0; i < nd.data.length; i += 4) {
+    const r = Math.random(); nd.data[i] = nd.data[i+1] = nd.data[i+2] = 255; nd.data[i+3] = r > .93 ? 70 : r * 22;
+  }
+  nctx.putImageData(nd, 0, 0);
+
+  const hasFilter = 'filter' in CanvasRenderingContext2D.prototype;
+  let W = 0, H = 0, running = false, hasStrokes = false, fogReady = false;
+  let mirror = true, invert = false, zoom = 1, zoomT = 1, curId = null, facing = 'user';
+
+  function resize() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    for (const c of [view, mask, tmp]) { c.width = W * dpr; c.height = H * dpr; }
+    for (const x of [ctx, mctx, tctx]) x.setTransform(dpr, 0, 0, dpr, 0, 0);
+    fogC.width = scr.width = 256; fogC.height = scr.height = Math.max(64, Math.round(256 * H / W)); fogReady = false; hasStrokes = false;
+  }
+  addEventListener('resize', resize); resize();
+
+  // object-fit: cover, optionally mirrored, with digital zoom about the centre
+  function drawCover(c2, w, h, z) {
+    const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
+    const s = Math.max(w / vw, h / vh) * z, dw = vw * s, dh = vh * s;
+    c2.save(); if (mirror) { c2.translate(w, 0); c2.scale(-1, 1); }
+    c2.drawImage(video, (w - dw) / 2, (h - dh) / 2, dw, dh); c2.restore();
+  }
+  function toScreen(p) {
+    const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
+    const s = Math.max(W / vw, H / vh), dw = vw * s, dh = vh * s;
+    const x0 = (W - dw) / 2 + (mirror ? 1 - p.x : p.x) * dw, y0 = (H - dh) / 2 + p.y * dh;
+    let ny = (H / 2 + (y0 - H / 2) * zoom) / H;
+    if (CFG.reach > 0) {                     // stretch the lowest part of the screen so the hand can stay in frame
+      const b = 1 - CFG.reach, a = b - 0.18;
+      if (ny > a) ny = a + (ny - a) * (1 - a) / (b - a);
+    }
+    return { x: W / 2 + (x0 - W / 2) * zoom, y: Math.min(ny, 1.03) * H };
+  }
+
+  // ---- One Euro filter ----
+  class OneEuro {
+    constructor(minC, beta) { this.minC = minC; this.beta = beta; this.dC = 1.5; this.p = null; }
+    static a(c, dt) { return 1 / (1 + 1 / (2 * Math.PI * c) / dt); }
+    reset() { this.p = null; }
+    filter(x, y, t) {
+      if (!this.p) { this.p = { dx: 0, dy: 0, t, hx: x, hy: y }; return { x, y }; }
+      const q = this.p, dt = Math.max(t - q.t, 1 / 120), ad = OneEuro.a(this.dC, dt);
+      q.dx += ad * ((x - q.hx) / dt - q.dx); q.dy += ad * ((y - q.hy) / dt - q.dy);
+      const a = OneEuro.a(this.minC + this.beta * Math.hypot(q.dx, q.dy), dt);
+      q.hx += a * (x - q.hx); q.hy += a * (y - q.hy); q.t = t;
+      return { x: q.hx, y: q.hy };
+    }
+  }
+  const smoother = new OneEuro(CFG.minCutoff, CFG.beta);
+
+  // ---- Finger state from joint angles ----
+  const state = { index: false, middle: false, ring: false, pinky: false };
+  let cut = false;   // palm / wrist partly outside the frame
+  const FING = { index: [5, 6, 7, 8], middle: [9, 10, 11, 12], ring: [13, 14, 15, 16], pinky: [17, 18, 19, 20] };
+  function angle(a, b, c, ar) {
+    const u = [(a.x - b.x) * ar, a.y - b.y, (a.z - b.z) * ar], v = [(c.x - b.x) * ar, c.y - b.y, (c.z - b.z) * ar];
+    const m = Math.hypot(...u) * Math.hypot(...v) || 1;
+    return Math.acos(Math.max(-1, Math.min(1, (u[0]*v[0] + u[1]*v[1] + u[2]*v[2]) / m))) * 180 / Math.PI;
+  }
+  function updateFingers(lm) {
+    const ar = (video.videoWidth || 16) / (video.videoHeight || 9);
+    const dist = (a, b) => Math.hypot((a.x - b.x) * ar, a.y - b.y, (a.z - b.z) * ar);
+    cut = [0, 5, 9, 13, 17].some(i => lm[i].y > 0.96 || lm[i].x < 0.02 || lm[i].x > 0.98);   // palm partly out of frame
+    for (const [name, [mcp, pip, dip, tip]] of Object.entries(FING)) {
+      if (cut) {   // judge each finger on its own: how straight is mcp -> tip? (no wrist needed)
+        const len = dist(lm[mcp], lm[pip]) + dist(lm[pip], lm[dip]) + dist(lm[dip], lm[tip]);
+        const st = dist(lm[mcp], lm[tip]) / (len || 1);
+        state[name] = state[name] ? st > 0.72 : st > 0.84;
+        continue;
+      }
+      const ang = (angle(lm[mcp], lm[pip], lm[dip], ar) + angle(lm[pip], lm[dip], lm[tip], ar)) / 2;
+      const longer = dist(lm[tip], lm[0]) > dist(lm[pip], lm[0]) * 1.05;
+      state[name] = state[name] ? (ang > 125 && longer) : (ang > 152 && longer);
+    }
+  }
+  function rawGesture() {
+    const { index: i, middle: m, ring: r, pinky: p } = state;
+    if (i && !m && !r && !p) return 'draw';
+    if (i && m) return 'pause';                    // two fingers (or open palm) = do nothing
+    if (!i && !m && !r && !p) return 'fist';
+    return 'none';
+  }
+
+  // ---- Fingertip lock: visual tracker that follows the fingertip even when the palm is out of frame ----
+  const TW = 384, HS = 9, S = 2 * HS + 1, SR = 16, N = 2 * SR + 1, LOCK_MS = 8000;
+  const gc = document.createElement('canvas'), gx = gc.getContext('2d', { willReadFrequently: true });
+  let gray = null, TH = 216;
+  const WGT = new Float32Array(S * S);
+  { let t = 0; for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) { const w = Math.exp(-(((i - HS) ** 2 + (j - HS) ** 2) / (HS * HS * .36)) / 2); WGT[j * S + i] = w; t += w; } for (let k = 0; k < WGT.length; k++) WGT[k] /= t; }
+  const trk = { active: false, good: false, x: 0, y: 0, vx: 0, vy: 0, ox: 0, oy: 0, bad: 0, noHand: 0, tpl: new Float32Array(S * S) };
+  const grid = new Float32Array(N * N), scratch = new Float32Array(S * S);
+  const inside = (cx, cy) => cx - HS >= 0 && cy - HS >= 0 && cx + HS < TW && cy + HS < TH;
+  function grabGray() {
+    const vw = video.videoWidth, vh = video.videoHeight; if (!vw) return;
+    TH = Math.round(TW * vh / vw); if (gc.width !== TW || gc.height !== TH) { gc.width = TW; gc.height = TH; }
+    gx.drawImage(video, 0, 0, TW, TH);
+    const d = gx.getImageData(0, 0, TW, TH).data;
+    if (!gray || gray.length !== TW * TH) gray = new Float32Array(TW * TH);
+    for (let i = 0, j = 0; j < gray.length; i += 4, j++) gray[j] = d[i] * .299 + d[i + 1] * .587 + d[i + 2] * .114;
+  }
+  function grab(cx, cy, out) { let k = 0; for (let j = 0; j < S; j++) { const row = (cy - HS + j) * TW + cx - HS; for (let i = 0; i < S; i++) out[k++] = gray[row + i]; } }
+  function seedTracker(lm) {            // called while MediaPipe sees the whole finger
+    if (!gray) return;
+    const a = lm[8], d = lm[7], px = (a.x + (d.x - a.x) * .4) * TW, py = (a.y + (d.y - a.y) * .4) * TH;
+    const cx = Math.round(px), cy = Math.round(py); if (!inside(cx, cy)) return;
+    grab(cx, cy, scratch);
+    if (trk.active && Math.hypot(trk.x - px, trk.y - py) < 8) { for (let k = 0; k < scratch.length; k++) trk.tpl[k] = trk.tpl[k] * .7 + scratch[k] * .3; }
+    else { trk.tpl.set(scratch); trk.vx = trk.vy = 0; }
+    if (trk.active) { trk.vx = .5 * trk.vx + .5 * (px - trk.x); trk.vy = .5 * trk.vy + .5 * (py - trk.y); }
+    trk.x = px; trk.y = py; trk.ox = a.x * TW - px; trk.oy = a.y * TH - py; trk.active = true; trk.good = true; trk.bad = 0;
+  }
+  function trackStep() {                // find the fingertip patch again in the new frame
+    if (!gray) return;
+    const gx0 = Math.round(trk.x + trk.vx), gy0 = Math.round(trk.y + trk.vy);
+    let best = 1e9, bi = -1, sum = 0, cnt = 0;
+    for (let dy = -SR; dy <= SR; dy++) {
+      const cy = gy0 + dy;
+      for (let dx = -SR; dx <= SR; dx++) {
+        const cx = gx0 + dx, gi = (dy + SR) * N + dx + SR;
+        if (!inside(cx, cy)) { grid[gi] = -1; continue; }
+        let sad = 0, k = 0;
+        for (let j = 0; j < S; j++) { const row = (cy - HS + j) * TW + cx - HS; for (let i = 0; i < S; i++, k++) sad += WGT[k] * Math.abs(gray[row + i] - trk.tpl[k]); }
+        grid[gi] = sad; sum += sad; cnt++; if (sad < best) { best = sad; bi = gi; }
+      }
+    }
+    if (bi < 0) { trk.active = trk.good = false; return; }
+    if (best < 30 && best < 0.85 * (sum / cnt)) {
+      const bx = bi % N, by = (bi / N) | 0, g = (x, y) => (x < 0 || y < 0 || x >= N || y >= N) ? -1 : grid[y * N + x];
+      let sx = 0, sy = 0; const l = g(bx - 1, by), r = g(bx + 1, by), u = g(bx, by - 1), dn = g(bx, by + 1);
+      if (l >= 0 && r >= 0 && l - 2 * best + r > 1e-3) sx = Math.max(-.5, Math.min(.5, .5 * (l - r) / (l - 2 * best + r)));
+      if (u >= 0 && dn >= 0 && u - 2 * best + dn > 1e-3) sy = Math.max(-.5, Math.min(.5, .5 * (u - dn) / (u - 2 * best + dn)));
+      const nx = gx0 + bx - SR + sx, ny = gy0 + by - SR + sy;
+      trk.vx = .6 * trk.vx + .4 * (nx - trk.x); trk.vy = .6 * trk.vy + .4 * (ny - trk.y); trk.x = nx; trk.y = ny;
+      const cx = Math.round(nx), cy = Math.round(ny);
+      if (inside(cx, cy)) { grab(cx, cy, scratch); for (let k = 0; k < scratch.length; k++) trk.tpl[k] += (scratch[k] - trk.tpl[k]) * .08; }
+      trk.bad = 0; trk.good = true;
+    } else {
+      trk.bad++; trk.x += trk.vx * .5; trk.y += trk.vy * .5; trk.vx *= .6; trk.vy *= .6;
+      trk.good = trk.bad <= 2; if (trk.bad > 5) trk.active = trk.good = false;
+    }
+  }
+  const trkTip = () => ({ x: (trk.x + trk.ox) / TW, y: (trk.y + trk.oy) / TH });
+
+  // ---- Gesture voting ----
+  const HN = 8, NEED = { draw: 4, pause: 5, fist: 5, none: 5 };
+  const hist = [], rawBuf = [];
+  let stable = 'none', lost = 0, clearing = 0, fistStart = null, fired = false;
+  let target = null, drawing = false, showCursor = false, nearEdge = false;
+  let brush = null, lastP = null, lastMid = null, resume = null;
+  const LABEL = { draw: '☝️ Drawing', pause: '✌️ Paused', none: 'Point one finger to draw', nohand: 'Show your hand to the camera' };
+  const setText = s => { if (statusEl.textContent !== s) statusEl.textContent = s; };
+  const endStroke = () => {          // remember where the line stopped so a brief dropout continues the same line
+    if (brush && lastP) resume = { bx: brush.x, by: brush.y, lp: lastP, lm: lastMid, t: performance.now() };
+    brush = lastP = lastMid = null;
+  };
+  const med = a => [...a].sort((p, q) => p - q)[a.length >> 1];
+
+  function resetHand() {
+    hist.length = 0; rawBuf.length = 0; stable = 'none'; endStroke(); smoother.reset();
+    target = null; drawing = false; showCursor = false; fistStart = null; fired = false; nearEdge = false;
+    trk.active = trk.good = false; trk.noHand = 0;
+  }
+
+  function feed(tipN, now) {          // normalised camera coords -> smoothed screen target
+    rawBuf.push(toScreen(tipN)); if (rawBuf.length > 3) rawBuf.shift();
+    target = smoother.filter(med(rawBuf.map(p => p.x)), med(rawBuf.map(p => p.y)), now / 1000);
+    nearEdge = target.y > H * 0.8;
+  }
+
+  function onResults(res) {
+    const lm = res.multiHandLandmarks && res.multiHandLandmarks[0];
+    const now = performance.now();
+
+    if (!lm) {
+      // hand not detected: stay locked on the fingertip with the visual tracker
+      if (stable === 'draw' && trk.active && trk.good) {
+        if (!trk.noHand) trk.noHand = now;
+        const tp = trkTip();
+        if (now - trk.noHand < LOCK_MS && tp.x > 0 && tp.x < 1 && tp.y > 0 && tp.y < 1) { feed(tp, now); showCursor = true; return; }
+      }
+      if (++lost > (nearEdge ? 16 : 8)) { resetHand(); setText(LABEL.nohand); }
+      return;
+    }
+    lost = 0; trk.noHand = 0;
+
+    updateFingers(lm);
+    hist.push(rawGesture()); if (hist.length > HN) hist.shift();
+    const locked = cut && stable === 'draw' && trk.active && trk.good;   // palm leaving the frame: keep drawing
+    if (!locked) {
+      const counts = {}; for (const g of hist) counts[g] = (counts[g] || 0) + 1;
+      let best = null;
+      for (const g in counts) if (counts[g] >= NEED[g] && (!best || counts[g] > counts[best])) best = g;
+      if (best && best !== stable) { stable = best; if (stable !== 'draw') { endStroke(); trk.active = trk.good = false; } }
+    }
+
+    if (stable === 'fist') {
+      if (fistStart === null) { fistStart = now; fired = false; }
+      const prog = Math.min(1, (now - fistStart) / CFG.holdMs);
+      if (prog >= 1 && !fired) { fired = true; clearing = 40; resume = null; }
+      setText(fired ? '✊ Cleared. Open your hand' : `✊ Hold to clear… ${Math.round(prog * 100)}%`);
+    } else { fistStart = null; fired = false; setText(LABEL[stable]); }
+
+    if (!cut && hist[hist.length - 1] === 'draw') seedTracker(lm);        // learn what the fingertip looks like
+    const a = lm[8], b = lm[7];
+    const useTrk = cut && trk.active && trk.good;                          // palm clipped: trust the tracker over guessed landmarks
+    feed(useTrk ? trkTip() : { x: a.x * .75 + b.x * .25, y: a.y * .75 + b.y * .25 }, now);
+
+    drawing = stable === 'draw' && (locked || (drawing ? hist.slice(-3).some(g => g === 'draw') : hist.slice(-2).every(g => g === 'draw')));
+    showCursor = stable === 'draw' || stable === 'none';
+    if (!drawing) endStroke();
+  }
+
+  // ---- Stroke engine: runs at display refresh for a smooth line ----
+  function addPoint(p) {
+    mctx.save();
+    mctx.lineCap = mctx.lineJoin = 'round'; mctx.lineWidth = CFG.brush; mctx.strokeStyle = mctx.fillStyle = '#000';
+    mctx.shadowColor = '#000'; mctx.shadowBlur = 16; mctx.beginPath();
+    if (!lastP) { mctx.arc(p.x, p.y, CFG.brush / 2, 0, 7); mctx.fill(); lastP = p; lastMid = p; }
+    else {
+      const mid = { x: (lastP.x + p.x) / 2, y: (lastP.y + p.y) / 2 };
+      mctx.moveTo(lastMid.x, lastMid.y); mctx.quadraticCurveTo(lastP.x, lastP.y, mid.x, mid.y); mctx.stroke();
+      lastMid = mid; lastP = p;
+    }
+    mctx.restore(); hasStrokes = true;
+  }
+  function stepBrush(dt) {
+    if (!drawing || !target) { endStroke(); return; }
+    if (!brush) {
+      const r = resume; resume = null;
+      if (r && performance.now() - r.t < 350 && Math.hypot(target.x - r.bx, target.y - r.by) < 180) { brush = { x: r.bx, y: r.by }; lastP = r.lp; lastMid = r.lm; }
+      else { brush = { x: target.x, y: target.y }; addPoint({ ...brush }); return; }
+    }
+    const dx = target.x - brush.x, dy = target.y - brush.y;
+    if (Math.hypot(dx, dy) < CFG.dead) return;
+    const k = 1 - Math.exp(-dt * CFG.follow);
+    brush.x += dx * k; brush.y += dy * k;
+    if (Math.hypot(brush.x - lastP.x, brush.y - lastP.y) >= 1.5) addPoint({ x: brush.x, y: brush.y });
+  }
+
+  // ---- Render ----
+  function cloud(x, y, r, a) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(255,255,255,${a})`); g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  // colour negative: white 'difference' fill flips every channel, works in every browser
+  function negate(c2, w, h) {
+    c2.save(); c2.globalCompositeOperation = 'difference'; c2.fillStyle = '#fff'; c2.fillRect(0, 0, w, h); c2.restore();
+  }
+  let lastMs = 0;
+  function render(ms) {
+    requestAnimationFrame(render);
+    const dt = Math.min((ms - lastMs) / 1000 || 0.016, 0.05); lastMs = ms;
+    if (!running || video.readyState < 2) return;
+
+    const dz = zoomT - zoom; zoom += dz * 0.2; if (Math.abs(dz) < 0.001) zoom = zoomT;
+    stepBrush(dt);
+
+    sctx.clearRect(0, 0, scr.width, scr.height);
+    drawCover(sctx, scr.width, scr.height, 1.12 * zoom);
+    if (invert) negate(sctx, scr.width, scr.height);
+    fctx.save();
+    fctx.globalAlpha = (!fogReady || Math.abs(dz) > 0.002) ? 0.7 : 0.2; fogReady = true;
+    if (hasFilter) fctx.filter = `blur(${CFG.fogBlur}px)`;
+    fctx.drawImage(scr, 0, 0);
+    fctx.restore();
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(fogC, 0, 0, W, H);
+    ctx.fillStyle = `rgba(214,226,236,${CFG.haze})`; ctx.fillRect(0, 0, W, H);
+    const t = ms / 1000, R = Math.max(W, H);
+    cloud(W * (.3 + .2 * Math.sin(t * .13)), H * (.4 + .15 * Math.cos(t * .1)), R * .55, .14);
+    cloud(W * (.72 + .15 * Math.cos(t * .09)), H * (.6 + .15 * Math.sin(t * .12)), R * .5, .11);
+    ctx.save(); ctx.globalAlpha = .55; ctx.fillStyle = ctx.createPattern(noise, 'repeat'); ctx.fillRect(0, 0, W, H); ctx.restore();
+
+    if (clearing > 0) {
+      mctx.save(); mctx.globalCompositeOperation = 'destination-out';
+      mctx.fillStyle = 'rgba(0,0,0,.14)'; mctx.fillRect(0, 0, W, H); mctx.restore();
+      if (--clearing === 0) { mctx.clearRect(0, 0, W, H); hasStrokes = false; }
+    }
+    if (hasStrokes) {
+      tctx.globalCompositeOperation = 'source-over'; tctx.clearRect(0, 0, W, H);
+      drawCover(tctx, W, H, zoom);
+      if (invert) negate(tctx, W, H);
+      tctx.globalCompositeOperation = 'destination-in'; tctx.drawImage(mask, 0, 0, W, H);
+      ctx.drawImage(tmp, 0, 0, W, H);
+    }
+
+    const cp = (drawing && brush) ? brush : target;
+    if (showCursor && cp) {
+      cursor.style.display = 'block'; cursor.className = drawing ? 'draw' : '';
+      cursor.style.left = cp.x + 'px'; cursor.style.top = cp.y + 'px';
+    } else cursor.style.display = 'none';
+  }
+
+  // ---- Camera ----
+  let toastT;
+  function toast(msg) { toastEl.textContent = msg; toastEl.style.display = 'block'; clearTimeout(toastT); toastT = setTimeout(() => toastEl.style.display = '', 2200); }
+  const setMirror = v => { mirror = v; $('mir').setAttribute('aria-pressed', String(v)); };
+  async function openCam(vc) {
+    if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+    const s = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, ...vc }, audio: false });
+    video.srcObject = s; await video.play();
+    const tr = s.getVideoTracks()[0], st = tr.getSettings();
+    curId = st.deviceId;
+    setMirror(st.facingMode ? st.facingMode !== 'environment' : !/back|rear|environment/i.test(tr.label || ''));
+    fogReady = false; resetHand();
+  }
+  async function switchCam() {
+    const prev = curId;
+    try {
+      const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+      if (devs.length > 1) {
+        const i = devs.findIndex(d => d.deviceId === curId);
+        await openCam({ deviceId: { exact: devs[(i + 1) % devs.length].deviceId } });
+      } else {
+        facing = facing === 'user' ? 'environment' : 'user';
+        await openCam({ facingMode: { ideal: facing } });
+        if (curId === prev) toast('Only one camera found');
+      }
+    } catch (e) {
+      toast('Could not switch camera');
+      try { await openCam({ facingMode: 'user' }); } catch (_) {}
+    }
+  }
+
+  // ---- UI ----
+  const setHidden = h => document.body.classList.toggle('nui', h);
+  const setZoom = v => { zoomT = Math.max(1, Math.min(4, v)); $('zoom').value = zoomT; $('zv').textContent = zoomT.toFixed(1) + '×'; };
+  $('flip').onclick = switchCam;
+  $('mir').onclick = () => { setMirror(!mirror); fogReady = false; resetHand(); };
+  $('inv').onclick = () => { invert = !invert; $('inv').setAttribute('aria-pressed', String(invert)); fogReady = false; };
+  const setThick = v => {
+    CFG.brush = Math.max(8, Math.min(90, Math.round(v)));
+    $('thick').value = CFG.brush; $('tv').textContent = CFG.brush;
+    cursor.style.width = cursor.style.height = CFG.brush + 'px';
+    cursor.style.margin = (-CFG.brush / 2) + 'px 0 0 ' + (-CFG.brush / 2) + 'px';
+  };
+  $('thick').oninput = e => setThick(parseFloat(e.target.value));
+  setThick(CFG.brush);
+  $('zoom').oninput = e => setZoom(parseFloat(e.target.value));
+  $('hide').onclick = () => setHidden(true);
+  $('reveal').onclick = () => setHidden(false);
+  view.addEventListener('wheel', e => { e.preventDefault(); setZoom(zoomT - e.deltaY * 0.002); }, { passive: false });
+  addEventListener('keydown', e => {
+    if (!running || e.target.tagName === 'INPUT') return;
+    const k = e.key.toLowerCase();
+    if (k === 'h') setHidden(!document.body.classList.contains('nui'));
+    else if (k === 'c') switchCam();
+    else if (k === 'm') $('mir').click();
+    else if (k === 'i') $('inv').click();
+    else if (k === ']') setThick(CFG.brush + 4);
+    else if (k === '[') setThick(CFG.brush - 4);
+    else if (k === '+' || k === '=') setZoom(zoomT + 0.25);
+    else if (k === '-') setZoom(zoomT - 0.25);
+  });
+
+  async function start() {
+    errEl.textContent = '';
+    if (!window.Hands) { errEl.textContent = 'Could not load the hand-tracking library. Check your internet connection and reload.'; return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      errEl.textContent = 'Camera access needs https:// or localhost. Open this file through a local server (for example: python -m http.server).'; return;
+    }
+    try { await openCam({ facingMode: 'user' }); }
+    catch (e) { errEl.textContent = 'Camera blocked or not found. Allow camera access in the browser and try again.'; return; }
+    const btn = $('start'); btn.textContent = 'Loading hand tracker…'; btn.disabled = true;
+    const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}` });
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.4 });
+    hands.onResults(onResults);
+    try { await hands.initialize(); } catch (e) { errEl.textContent = 'Hand tracker failed to load. Reload and try again.'; btn.disabled = false; btn.textContent = 'Start camera'; return; }
+    running = true; $('intro').style.display = 'none';
+    statusEl.style.display = 'block'; $('controls').style.display = 'flex'; document.body.classList.add('live');
+    setText(LABEL.nohand);
+    (async function loop() {
+      if (video.readyState >= 2) { grabGray(); if (trk.active) trackStep(); try { await hands.send({ image: video }); } catch (e) {} }
+      requestAnimationFrame(loop);
+    })();
+  }
+  $('start').addEventListener('click', start);
+  requestAnimationFrame(render);
+})();
+</script>
+<script>
+(() => {
+  const intro = document.getElementById('intro'), cv = document.getElementById('introFog'), c = cv.getContext('2d');
+  const hint = document.getElementById('wipeHint'), drops = document.getElementById('drops');
+  for (let i = 0; i < 46; i++) {
+    const d = document.createElement('i'), sz = 3 + Math.pow(Math.random(), 2.2) * 16;
+    d.className = 'drop';
+    d.style.cssText = `width:${sz}px;height:${sz * (1 + Math.random() * .25)}px;left:${Math.random() * 100}%;top:${Math.random() * 100}%;opacity:${.35 + Math.random() * .5}`;
+    drops.appendChild(d);
+  }
+  let w = 0, h = 0; const pts = []; let prev = null; const LIFE = 5000, R = 46;
+  function size() {
+    const dpr = Math.min(devicePixelRatio || 1, 2); w = intro.clientWidth; h = intro.clientHeight;
+    cv.width = w * dpr; cv.height = h * dpr; c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  addEventListener('resize', size); size();
+  function move(e) {
+    const r = intro.getBoundingClientRect(), p = { x: e.clientX - r.left, y: e.clientY - r.top }, t = performance.now();
+    if (prev) {
+      const dx = p.x - prev.x, dy = p.y - prev.y, n = Math.ceil(Math.hypot(dx, dy) / 10);
+      for (let i = 1; i <= n; i++) pts.push({ x: prev.x + dx * i / n, y: prev.y + dy * i / n, t });
+    } else pts.push({ ...p, t });
+    prev = p; if (pts.length > 700) pts.splice(0, pts.length - 700);
+    hint.classList.add('gone');
+  }
+  intro.addEventListener('pointermove', move); intro.addEventListener('pointerdown', move);
+  intro.addEventListener('pointerleave', () => { prev = null; });
+  (function frame(now) {
+    if (intro.style.display === 'none') return;
+    requestAnimationFrame(frame);
+    c.globalCompositeOperation = 'source-over'; c.clearRect(0, 0, w, h);
+    c.fillStyle = 'rgba(172,194,208,.30)'; c.fillRect(0, 0, w, h);
+    c.globalCompositeOperation = 'destination-out';
+    for (let i = pts.length - 1; i >= 0; i--) {
+      const q = pts[i], a = 1 - (now - q.t) / LIFE;
+      if (a <= 0) { pts.splice(0, i + 1); break; }
+      const g = c.createRadialGradient(q.x, q.y, 0, q.x, q.y, R);
+      g.addColorStop(0, `rgba(0,0,0,${a * .9})`); g.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = g; c.fillRect(q.x - R, q.y - R, R * 2, R * 2);
+    }
+  })(performance.now());
+})();
+</script>
+</body>
+</html>
